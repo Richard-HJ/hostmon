@@ -56,11 +56,12 @@
 #define OUTFILENAME_MAXLEN 128
 
 /* parameters */
-    char out_filename[OUTFILENAME_MAXLEN];          /* name of file to open */ 
-    int output_file =0;                          /* set =1 to write stats to file else to terminal */
+    char out_filename[OUTFILENAME_MAXLEN];      /* name of file to open */ 
+    int output_file =0;                         /* set =1 to write stats to file else to terminal */
     int interval_stats_sec =0;      	        /* time interval between reading TCP stats */ 
     int quiet = 0;                              /* set =1 for just printout of results - monitor mode */
     int verbose =0;                  		    /* set to 1 for printout (-v) */
+    int run_time_sec =0;                        /* no of sec to run test */
     int extended_output =1;                     /* set to 1 for more printout (CPUStats */
     int cpu_affinity_core =-1;                  /* cpu affinity core -1 = core number not used this time */
     cpu_set_t cpu_affinity_cpuset;              /* cpu affinity from -a */
@@ -159,11 +160,18 @@ int main (int argc, char **argv)
 		 
 /* clear the local stats */
 
-/* set the alarm to determine when to read the TCP stats.
-   If a time is set for the length of the test the sig_alrm() handler sets loop_max to 0 to stop */
-	if(verbose)printf("interval_stats_sec %d\n", interval_stats_sec);
+/* set the alarm to determine when to read the stats.
+   If a time is set for the length of the test the sig_alrm() handler checks if have to stop */
+	if(verbose)printf("run_time_sec %d interval_stats_sec %d\n", run_time_sec, interval_stats_sec);
+
 	if(interval_stats_sec >0) {
 		alarm(interval_stats_sec);
+	}
+	else if(run_time_sec >0) {
+		alarm(run_time_sec);
+	}
+	/* check if have to set timer to repeat */
+	if(interval_stats_sec >0) {
 		timer_value.it_interval.tv_sec = interval_stats_sec;         /* Value to reset the timer when the it_value time elapses:*/
 		timer_value.it_interval.tv_usec = 0;                         /*  (in us) */
 		timer_value.it_value.tv_sec = interval_stats_sec;            /* Time to the next timer expiration: 1 seconds */
@@ -219,12 +227,13 @@ options:\n\
 	-f = output file name [terminal]\n\
 	-h = print this message\n\
 	-i = <time interval between reading TCP stats sec [10s]>\n\
+	-t = <no. of seconds to run the test >\n\
 	-q = quiet - only print results\n\
 	"};
 
     error=0;
     
-    while ((c = getopt(argc, argv, "a:f:i:A:hqV")) != (char) EOF) {
+    while ((c = getopt(argc, argv, "a:f:i:t:A:hqV")) != (char) EOF) {
 	switch(c) {
 
 	    case 'a':
@@ -254,6 +263,14 @@ options:\n\
 	    case 'i':
 		if (optarg != NULL) {
 		    interval_stats_sec = atoi(optarg);
+		} else {
+		    error = 1;
+		}
+		break;
+
+	    case 't':
+		if (optarg != NULL) {
+		    run_time_sec = atoi(optarg);
 		} else {
 		    error = 1;
 		}
@@ -342,15 +359,23 @@ static void sig_alrm( int signo)
 	delta_t_elapsed = StopWatch_TimeDiff(&stopwatch_elapsed);
     time_alive_sec = delta_t_elapsed/1000000 + 0.01 ;  // allow for rounding errors
 
-/* record the incremental network stats */
-	net_snmp_Snap(  &net_snmp_stats, net_if_info, &snmp_info );
-	net_snmp_Info(  &net_snmp_stats, net_if_info, &snmp_info);
+/* check if we terminate the program or just print snapshot of statistics */
+	if(time_alive_sec < run_time_sec || (run_time_sec ==0)){
 
-/* print the data */
-	printf("%d ;", time_alive_sec);
-	net_print_info_file( net_if_info, &snmp_info, 2, 'L', out_file);		
+		/* record the incremental network stats */
+		net_snmp_Snap(  &net_snmp_stats, net_if_info, &snmp_info );
+		net_snmp_Info(  &net_snmp_stats, net_if_info, &snmp_info);
 
-	printf("\n");
+		/* print the data */
+		printf("%d ;", time_alive_sec);
+		net_print_info_file( net_if_info, &snmp_info, 2, 'L', out_file);		
+
+		printf("\n");
+	}
+    else {
+        /* run_time_sec timer determining the length of the test has expired */
+		exit(EXIT_SUCCESS);
+    }
 	
 	return;
 }
